@@ -1,0 +1,39 @@
+#!/bin/sh
+
+# check if qos module is ready
+{
+    flock -x 25
+    [ ! -f /tmp/ip_qos/.ready ] && echo -e " qos module has not been start, ignore tmngtd msg !" && exit    
+    flock -u 25
+} 25<> /tmp/ip_qos/.lock
+
+cmd=$1
+symbol="$2"
+
+# record time obj trigger log
+mkdir -p "/tmp/ip_qos"
+local TMNG_LOG="/tmp/ip_qos/tmng.log"
+[ ! -f $TMNG_LOG ] && echo -e "time \tcmd \ttimeobj_symbol" > $TMNG_LOG
+[ "`ls -l $TMNG_LOG | awk '{print $5}'`" -gt 50000 ] && echo -e "time \tcmd \ttimeobj_symbol" > $TMNG_LOG
+echo -e "`date +%Y%m%d-%H:%M:%S` $cmd $symbol" >> $TMNG_LOG
+
+[ "$cmd" = "RESET" ] && exit 0
+. /lib/ip_qos/dispatch.sh time $cmd $symbol
+exit 0
+
+# shift
+# case $cmd in
+#     *ACTIVE)
+#         echo "active event!"
+#         echo "symbol=$1"
+#     ;;
+#
+#     *EXPIRE)
+#         echo "expire event!"
+#         echo "symbol=$1"
+#     ;;
+#
+#     *RESET)
+#         echo "reset event!"
+#     ;;
+# esac

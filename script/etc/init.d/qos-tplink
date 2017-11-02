@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+
+START=52
+start() {
+    # . /lib/ip_qos/dispatch.sh stop all
+    . /lib/ip_qos/dispatch.sh start all
+}
+
+restart() {
+    rm -rf /tmp/ip_qos/
+    . /lib/ip_qos/dispatch.sh stop all
+    . /lib/ip_qos/dispatch.sh start all
+}
+
+stop() {
+    . /lib/ip_qos/dispatch.sh stop all
+}

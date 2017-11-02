@@ -1,0 +1,45 @@
+#!/bin/sh
+# hotplug event for ip_qos
+
+# ACTION triggered by netifd
+[ "$INTERFACE" = loopback ] && exit
+
+# IF qos not in rc.d, we shall NOT response hotplug
+#[ `ls /etc/rc.d | grep -c "qos"` -eq 0 ] && exit
+
+
+# record the log
+mkdir -p "/tmp/ip_qos"
+local HOTP_LOG="/tmp/ip_qos/iface_hotplug.log"
+[ ! -f $HOTP_LOG ] && echo -e "time \ttrigger \taction" > $HOTP_LOG
+[ "`ls -l $HOTP_LOG | awk '{print $5}'`" -gt 100000 ] && echo -e "time \ttrigger \taction" > $HOTP_LOG
+echo -e "`date +%Y%m%d-%H:%M:%S` $INTERFACE $ACTION" >> $HOTP_LOG
+
+# check if qos module is ready
+local QOS_LOCK="/tmp/ip_qos/.lock"
+{
+    flock -x 25
+    [ ! -f /tmp/ip_qos/.ready ] && echo -e "`date +%Y%m%d-%H:%M:%S` \tqos not start, ignore hotplug msg!" >>$HOTP_LOG && exit
+    flock -u 25
+} 25<> $QOS_LOCK
+
+case "$ACTION" in
+    ifup)
+        # for ifup, INTERFACE init and rule install
+        #sh /lib/ip_qos/api.sh ifup $INTERFACE
+        # . /lib/ip_qos/dispatch.sh stop
+        # . /lib/ip_qos/dispatch.sh start
+        . /lib/ip_qos/dispatch.sh ifup $INTERFACE
+        ;;
+    ifdown)
+         # for ifdown, just flush nf and tc concerned by this interface!
+         	# Thus improve some performance of ipt-mangle
+         #sh /lib/ip_qos/api.sh ifdown $INTERFACE
+         # . /lib/ip_qos/dispatch.sh stop
+         # . /lib/ip_qos/dispatch.sh start
+         . /lib/ip_qos/dispatch.sh ifdown $INTERFACE
+         ;;
+    *)
+        echo -e "`date +%Y%m%d-%H:%M:%S` \tillegal $ACTION!" >> $HOTP_LOG
+    ;;
+esac

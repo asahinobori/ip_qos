@@ -1,0 +1,27 @@
+#!/bin/sh
+# hotplug event for ipgroup update
+
+# record the log
+mkdir -p "/tmp/ip_qos"
+local HOTP_LOG="/tmp/ip_qos/ipgroup_hotplug.log"
+[ ! -f $HOTP_LOG ] && echo -e "time \ttrigger \taction" > $HOTP_LOG
+[ "`ls -l $HOTP_LOG | awk '{print $5}'`" -gt 100000 ] && echo -e "time \ttrigger \taction" > $HOTP_LOG
+echo -e "`date +%Y%m%d-%H:%M:%S` $group_name $ACTION" >> $HOTP_LOG
+
+# check if qos module is ready
+local QOS_LOCK="/tmp/ip_qos/.lock"
+{
+    flock -x 25
+    [ ! -f /tmp/ip_qos/.ready ] && echo -e "`date +%Y%m%d-%H:%M:%S` \tqos not start, ignore hotplug msg!" >>$HOTP_LOG && exit
+    flock -u 25
+} 25<> $QOS_LOCK
+
+# response
+case "$ACTION" in
+    update)
+        . /lib/ip_qos/dispatch.sh ipgroup $ACTION $group_name
+    ;;
+    *)
+        echo -e "`date +%Y%m%d-%H:%M:%S` \tillegal $ACTION!" >> $HOTP_LOG
+    ;;
+esac
