@@ -117,16 +117,17 @@ static void tc_htb_opt_parse(struct nlmsghdr *n, uint32_t rate, uint32_t ceil, u
     rate = (rate * 1000) / 8; //byte per second
     ceil = (ceil * 1000) / 8;
 
+    if (0 == rate) {
+        rate = 125; // 0 means set min rate, change to 1 Kbit
+    }
+    if (0 == ceil) {
+        ceil = 125000000; // 0 means set max ceil rate, change to 1Gbit
+    }
+
     // buffer = (rate/100)*2 here, rate is Bps, buffer is Byte
     buffer = rate / 50;
     cbuffer = ceil / 50;
 
-    if (0 == rate) {
-        rate = 125000000;
-    }
-    if (0 == ceil) {
-        ceil = 125000000;
-    }
     if (buffer < mtu) buffer = mtu;
     if (cbuffer < mtu) cbuffer = mtu;
 
@@ -200,6 +201,56 @@ static int tc_htb_class_modify(int cmd, unsigned int flags, ruletbl_node_t* rn, 
                 tc_htb_opt_parse(&req.n, rn->rate_min, rn->rate, dev_mtu);
             }
         }
+        qmark_tc_rtnl_talk(&req.n);
+    }
+
+    return OK;
+}
+
+static int tc_pfifo_qdisc_modify(int cmd, unsigned int flags, ruletbl_node_t* rn, uint32_t mark) {
+    struct rtnl_req req;
+    struct tc_fifo_qopt opt;
+    struct net_device *dev;
+    int i;
+
+    uint32_t mark_offset = mark >> MARK_BASE;
+
+    for (i = 0; i < 2; i++) {
+        memset(&req, 0, sizeof(req));
+        memset(&opt, 0, sizeof(opt));
+
+        opt.limit = 100;  // Packets
+
+        req.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct tcmsg));
+        req.n.nlmsg_flags = NLM_F_REQUEST | flags;
+        req.n.nlmsg_type = cmd;
+        req.t.tcm_family = AF_UNSPEC;
+        if (0 == rn->devid) {
+            req.t.tcm_handle = (mark_offset + 1) << 16;
+            req.t.tcm_parent = (1<<16) | (mark_offset + 1);
+        } else {
+            req.t.tcm_handle = ((rn->devid+1)*TC_MAX_IP_CNT+mark_offset) << 16;
+            req.t.tcm_parent = (1<<16) | ((rn->devid+1)*TC_MAX_IP_CNT+mark_offset);
+        }
+
+        if (0 == i) {
+            dev = dev_get_by_name(&init_net, qmark_lan_dev);
+        } else {
+            dev = dev_get_by_name(&init_net, qmark_wan_dev);
+        }
+        if (dev != NULL) {
+            req.t.tcm_ifindex = dev->ifindex;
+            dev_put(dev);
+        } else {
+            return ERROR;
+        }
+
+        qmark_tc_addattr(&req.n, sizeof(req), TCA_KIND, "pfifo", 6);
+
+        if (cmd == RTM_NEWQDISC) {
+            qmark_tc_addattr(&req.n, 1024, TCA_OPTIONS, &opt, sizeof(opt));
+        }
+
         qmark_tc_rtnl_talk(&req.n);
     }
 
@@ -321,8 +372,8 @@ void qmark_tc_add_rule(ruletbl_node_t* rn, uint32_t mark) {
     //     rate $rate_min ceil $rate burst $burst cburst $cburst
     tc_htb_class_modify(RTM_NEWTCLASS, NLM_F_EXCL|NLM_F_CREATE, rn, mark);
 
-    // tc qdisc add dev $dev parent 1:$cid handle $hid sfq
-    tc_sfq_qdisc_modify(RTM_NEWQDISC, NLM_F_EXCL|NLM_F_CREATE, rn, mark);
+    // tc qdisc add dev $dev parent 1:$cid handle $hid pfifo limit 100
+    tc_pfifo_qdisc_modify(RTM_NEWQDISC, NLM_F_EXCL|NLM_F_CREATE, rn, mark);
 
     // tc filter add dev $dev parent 1: prio $PRIO_FILTER
     //     handle $nfmark/$QOS_MARK_MASK fw flowid 1:$cid
@@ -336,7 +387,7 @@ void qmark_tc_del_rule(ruletbl_node_t* rn, uint32_t mark) {
 
     // tc qdisc del dev $dev parent 1:$cid handle $hid
     // delelte relative qdisc is unnecessary, since it will be deleted by its parent
-    // tc_sfq_qdisc_modify(RTM_DELQDISC, 0, rn, mark);
+    // tc_pfifo_qdisc_modify(RTM_DELQDISC, 0, rn, mark);
 
     // tc class del dev $dev classid 1:$cid
     tc_htb_class_modify(RTM_DELTCLASS, 0, rn, mark);
